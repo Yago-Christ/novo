@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Rosas — Canvas SVG from JSON</title>
+<style>
+  :root { --bg:#0b0b0b; --ui:#111; --muted:#bbb; }
+  html,body { height:100%; margin:0; background:var(--bg); color:var(--muted); font-family:Inter, Roboto, sans-serif; }
+  .wrap { display:flex; gap:16px; padding:16px; box-sizing:border-box; height:100%; }
+  .left { flex:1; display:flex; flex-direction:column; gap:8px; }
+  canvas { background:transparent; border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,.6); width:100%; height:calc(100% - 120px); }
+  .controls { display:flex; gap:8px; align-items:center; }
+  button, select { background:var(--ui); color:var(--muted); border:1px solid #222; padding:8px 10px; border-radius:6px; cursor:pointer; }
+  textarea { width:100%; height:120px; background:#060606; color:#ddd; border:1px solid #222; padding:8px; border-radius:6px; font-family:monospace; resize:vertical; }
+  .right { width:360px; display:flex; flex-direction:column; gap:8px; }
+  label { font-size:13px; color:#9aa; }
+  small { color:#666; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="left">
+    <div class="controls">
+      <button id="loadJSON">Carregar roses.json</button>
+      <button id="pasteMode">Colar JSON</button>
+      <label><input type="checkbox" id="autoRotate" checked /> Auto-rotacionar</label>
+      <label>Velocidade <input type="range" id="speed" min="-2" max="2" step="0.05" value="0.6"></label>
+      <button id="resetView">Resetar</button>
+    </div>
+
+    <canvas id="cv" width="1000" height="800"></canvas>
+
+    <div style="display:flex; gap:8px; align-items:center;">
+      <small>Coloque <strong>roses.json</strong> na mesma pasta do HTML e use "Carregar roses.json", ou cole JSON no painel à direita.</small>
+    </div>
+  </div>
+
+  <div class="right">
+    <label for="jsonText">JSON (cole aqui se não quiser servir arquivo)</label>
+    <textarea id="jsonText" placeholder="Cole o conteúdo do roses.json aqui..."></textarea>
+    <div style="display:flex; gap:8px;">
+      <button id="drawFromText">Desenhar do texto</button>
+      <button id="downloadPNG">Baixar PNG</button>
+    </div>
+    <div>
+      <label>Filtro de fundo (área relativa):</label>
+      <select id="bgFilter">
+        <option value="0.5">Excluir se > 50% da área total (padrão)</option>
+        <option value="0.3">Excluir se > 30%</option>
+        <option value="0.7">Excluir se > 70%</option>
+        <option value="0">Não filtrar</option>
+      </select>
+    </div>
+    <div>
+      <label>Legenda rápida</label>
+      <div>
+        <small>O script escala e centraliza automaticamente. Usa fórmula do polígono para área (shoelace). Rotação por transform no canvas.</small>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/*
+  roses.html
+  - busca "roses.json" via fetch (mesma pasta)
+  - aceita colar JSON manualmente
+  - desenha polígonos preenchidos no canvas, usa rgb dos arrays [r,g,b] (0..1)
+  - centraliza e escala
+  - filtra regiões cuja área (bbox area) excede fracção do bbox total
+  - anima rotação (requestAnimationFrame)
+*/
+
+const canvas = document.getElementById('cv');
+const ctx = canvas.getContext('2d', { alpha: true });
+let regions = [];
+let bbox = null; // {minx,maxx,miny,maxy}
+let scale = 1, centerX = 0, centerY = 0;
+let rotation = 0; // radians
+let running = true;
+let speedControl = document.getElementById('speed');
+let autoRotate = document.getElementById('autoRotate');
+let bgFilterSelect = document.getElementById('bgFilter');
+
+function fitCanvasToDisplay() {
+  // make canvas high-res but keep css size
+  const ratio = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.round(rect.width * ratio);
+  canvas.height = Math.round(rect.height * ratio);
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+}
+fitCanvasToDisplay();
+window.addEventListener('resize', () => { fitCanvasToDisplay(); drawFrame(); });
+
+function computeBoundingBox(regs) {
+  let minx=Infinity, miny=Infinity, maxx=-Infinity, maxy=-Infinity;
+  regs.forEach(r => {
+    r.contour.forEach(p => {
+      const x=p[0], y=p[1];
+      if (x<minx) minx=x;
+      if (x>maxx) maxx=x;
+      if (y<miny) miny=y;
+      if (y>maxy) maxy=y;
+    });
+  });
+  return {minx,miny,maxx,maxy};
+}
+
+function polygonArea(points) {
+  // Shoelace formula (absolute area)
+  let a=0;
+  for(let i=0;i<points.length;i++){
+    const [x1,y1]=points[i];
+    const [x2,y2]=points[(i+1)%points.length];
+    a += x1*y2 - x2*y1;
+  }
+  return Math.abs(a)/2;
+}
+
+function prepare(regs) {
+  regions = regs.slice(); // copy
+  bbox = computeBoundingBox(regions);
+  const width = bbox.maxx - bbox.minx;
+  const height = bbox.maxy - bbox.miny;
+  // leave margin
+  const margin = 40;
+  const canvasW = canvas.clientWidth - margin;
+  const canvasH = canvas.clientHeight - margin;
+  scale = Math.min(canvasW / width, canvasH / height);
+  centerX = (bbox.minx + bbox.maxx)/2;
+  centerY = (bbox.miny + bbox.maxy)/2;
+
+  // precompute pixel colors and area/bbox area for each region
+  regions.forEach(r => {
+    // color given as [r,g,b] in 0..1
+    const c = r.color || [0,0,0];
+    const cr = Math.round((c[0]||0)*255);
+    const cg = Math.round((c[1]||0)*255);
+    const cb = Math.round((c[2]||0)*255);
+    r._fillStyle = `rgb(${cr},${cg},${cb})`;
+    // area (approx using polygon area in original coordinate space)
+    r._area = polygonArea(r.contour);
+    // bbox area of region (for rough background detection)
+    let minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity;
+    r.contour.forEach(p=>{ if(p[0]<minx) minx=p[0]; if(p[0]>maxx) maxx=p[0]; if(p[1]<miny) miny=p[1]; if(p[1]>maxy) maxy=p[1]; });
+    r._bboxArea = Math.abs((maxx-minx)*(maxy-miny));
+  });
+}
+
+function drawFrame() {
+  // clear
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // center canvas coordinate system
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  ctx.save();
+  ctx.translate(w/2, h/2);
+  ctx.rotate(rotation);
+
+  // scale to fit and flip Y because original coords are usual image coords (y increases down)
+  ctx.scale(scale, scale);
+  ctx.translate(-centerX, -centerY);
+
+  // determine filter threshold
+  let totalBBoxArea = (bbox.maxx - bbox.minx) * (bbox.maxy - bbox.miny);
+  const filterFrac = parseFloat(bgFilterSelect.value) || 0.5;
+
+  regions.forEach(r => {
+    // skip huge elements that are likely background
+    if (filterFrac > 0 && r._bboxArea > totalBBoxArea * filterFrac) {
+      return;
+    }
+
+    ctx.beginPath();
+    const pts = r.contour;
+    if (!pts || pts.length===0) return;
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i=1;i<pts.length;i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+
+    // stroke optional for small polygons
+    ctx.fillStyle = r._fillStyle || 'black';
+    ctx.fill();
+  });
+
+  ctx.restore();
+}
+
+let lastTime = performance.now();
+function animate(now) {
+  const dt = (now - lastTime)/1000;
+  lastTime = now;
+  if (autoRotate.checked) {
+    const sp = parseFloat(speedControl.value) || 0.6;
+    rotation += sp * dt * 0.5; // tweak rotation sensitivity
+  }
+  drawFrame();
+  if (running) requestAnimationFrame(animate);
+}
+
+requestAnimationFrame(animate);
+
+// UI hooks
+document.getElementById('loadJSON').addEventListener('click', async () => {
+  try {
+    const res = await fetch('roses.json', {cache:'no-store'});
+    if (!res.ok) throw new Error('Erro ao carregar roses.json: ' + res.status);
+    const data = await res.json();
+    prepare(data);
+    drawFrame();
+    document.getElementById('jsonText').value = JSON.stringify(data, null, 2);
+  } catch (err) {
+    alert('Falha ao carregar roses.json. Verifique se o arquivo está na mesma pasta e se está acessível.\n\n' + err);
+  }
+});
+
+document.getElementById('pasteMode').addEventListener('click', () => {
+  document.getElementById('jsonText').focus();
+});
+
+document.getElementById('drawFromText').addEventListener('click', () => {
+  const txt = document.getElementById('jsonText').value.trim();
+  if (!txt) { alert('Cole o JSON no painel à direita primeiro.'); return; }
+  try {
+    const data = JSON.parse(txt);
+    if (!Array.isArray(data)) throw new Error('JSON não é um array de regiões.');
+    prepare(data);
+    drawFrame();
+  } catch (err) {
+    alert('JSON inválido: ' + err);
+  }
+});
+
+document.getElementById('resetView').addEventListener('click', () => {
+  rotation = 0;
+  drawFrame();
+});
+
+document.getElementById('downloadPNG').addEventListener('click', () => {
+  // create a copy canvas at desired resolution
+  const link = document.createElement('a');
+  link.download = 'roses.png';
+  // To capture current view, draw into a temporary canvas at device pixel ratio
+  const tmp = document.createElement('canvas');
+  const ratio = 2;
+  tmp.width = canvas.clientWidth * ratio;
+  tmp.height = canvas.clientHeight * ratio;
+  const tctx = tmp.getContext('2d');
+  // draw with same transform but scaled to tmp
+  tctx.clearRect(0,0,tmp.width,tmp.height);
+  tctx.save();
+  tctx.translate(tmp.width/2, tmp.height/2);
+  tctx.rotate(rotation);
+  tctx.scale(scale*ratio, scale*ratio);
+  tctx.translate(-centerX, -centerY);
+  const filterFrac = parseFloat(bgFilterSelect.value) || 0.5;
+  let totalBBoxArea = (bbox.maxx - bbox.minx) * (bbox.maxy - bbox.miny);
+
+  regions.forEach(r => {
+    if (filterFrac > 0 && r._bboxArea > totalBBoxArea * filterFrac) return;
+    tctx.beginPath();
+    const pts = r.contour;
+    tctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i=1;i<pts.length;i++) tctx.lineTo(pts[i][0], pts[i][1]);
+    tctx.closePath();
+    tctx.fillStyle = r._fillStyle;
+    tctx.fill();
+  });
+
+  tctx.restore();
+  link.href = tmp.toDataURL('image/png');
+  link.click();
+});
+
+// quick initial example: if user didn't load, show empty canvas with a hint
+drawFrame();
+</script>
+</body>
+</html>
