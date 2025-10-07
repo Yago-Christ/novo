@@ -10,33 +10,33 @@
       display: flex;
       justify-content: center;
       align-items: center;
-      background: #f4f1ea url('https://i.ibb.co/VxQkcd3/paper-texture.jpg') repeat;
+      background: #f4f1ea url('https://i.ibb.co/WzhF7Vj/vintage-paper.jpg') center/cover no-repeat;
       font-family: 'Courier New', monospace;
       padding: 20px;
     }
     .card {
-      max-width: 600px;
-      background: rgba(255, 255, 255, 0.8);
-      padding: 30px;
+      max-width: 650px;
+      background: rgba(255, 255, 255, 0.75);
+      padding: 35px;
       border: 2px solid #333;
       box-shadow: 6px 6px 0 rgba(0,0,0,0.6);
       position: relative;
     }
     .message {
-      font-size: 18px;
-      line-height: 1.6;
+      font-size: 19px;
+      line-height: 1.7;
       white-space: pre-wrap;
-      min-height: 200px;
+      min-height: 240px;
     }
     .signature {
       font-family: 'Brush Script MT', cursive;
-      font-size: 28px;
+      font-size: 30px;
       color: #b33a3a;
       opacity: 0;
       transform: scale(0.5) rotate(-10deg);
       position: absolute;
-      bottom: 20px;
-      right: 30px;
+      bottom: 25px;
+      right: 40px;
     }
     .signature.stamp {
       animation: stamp 1s forwards ease-out;
@@ -49,7 +49,7 @@
     .cursor {
       display: inline-block;
       width: 10px;
-      height: 20px;
+      height: 22px;
       background: #000;
       margin-left: 4px;
       animation: blink 0.8s infinite;
@@ -63,6 +63,9 @@
     <div class="signature" id="signature">Yago Christ</div>
   </div>
 
+  <audio id="keySound" src="https://assets.mixkit.co/active_storage/sfx/2220/2220-preview.mp3"></audio>
+  <audio id="dingSound" src="https://assets.mixkit.co/active_storage/sfx/2108/2108-preview.mp3"></audio>
+
   <script>
     const text = `Querida,
 
@@ -73,15 +76,22 @@ Com carinho,`;
     
     const msgEl = document.getElementById("message");
     const signatureEl = document.getElementById("signature");
+    const keySound = document.getElementById("keySound");
+    const dingSound = document.getElementById("dingSound");
     
     let i = 0;
     function typeWriter() {
       if (i < text.length) {
         msgEl.innerHTML = text.substring(0, i+1) + '<span class="cursor"></span>';
         i++;
+        if (text[i-1] !== " " && text[i-1] !== "\n") {
+          keySound.currentTime = 0;
+          keySound.play();
+        }
         setTimeout(typeWriter, 70 + Math.random()*80);
       } else {
         msgEl.innerHTML = text;
+        dingSound.play();
         setTimeout(()=>signatureEl.classList.add("stamp"), 800);
       }
     }
