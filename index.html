@@ -10,16 +10,17 @@
       display: flex;
       justify-content: center;
       align-items: center;
-      background: #f4f1ea url('https://i.ibb.co/WzhF7Vj/vintage-paper.jpg') center/cover no-repeat;
+      background: #000;
       font-family: 'Courier New', monospace;
       padding: 20px;
+      overflow: hidden;
     }
     .card {
       max-width: 650px;
-      background: rgba(255, 255, 255, 0.75);
+      background: rgba(255, 255, 255, 0.05);
       padding: 35px;
-      border: 2px solid #333;
-      box-shadow: 6px 6px 0 rgba(0,0,0,0.6);
+      border: 2px solid rgba(255,255,255,0.2);
+      box-shadow: 6px 6px 20px rgba(255, 107, 129, 0.5);
       position: relative;
     }
     .message {
@@ -27,11 +28,12 @@
       line-height: 1.7;
       white-space: pre-wrap;
       min-height: 240px;
+      color: #fff;
     }
     .signature {
       font-family: 'Brush Script MT', cursive;
       font-size: 30px;
-      color: #b33a3a;
+      color: #ff6b81;
       opacity: 0;
       transform: scale(0.5) rotate(-10deg);
       position: absolute;
@@ -50,14 +52,41 @@
       display: inline-block;
       width: 10px;
       height: 22px;
-      background: #000;
+      background: #fff;
       margin-left: 4px;
       animation: blink 0.8s infinite;
     }
     @keyframes blink { 50% { opacity: 0; } }
+
+    /* Floating hearts */
+    .hearts-container {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+    .hearts-container i {
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      background: #ff6b81;
+      transform: rotate(-45deg);
+      border-radius: 3px;
+      opacity: 0.8;
+      animation: float 6s linear infinite, blinkHeart 1.5s infinite alternate;
+    }
+    @keyframes float {
+      0% { transform: translateY(0) rotate(0deg); }
+      100% { transform: translateY(-1200px) rotate(360deg); }
+    }
+    @keyframes blinkHeart {
+      0% { opacity: 0.3; }
+      50% { opacity: 1; }
+      100% { opacity: 0.3; }
+    }
   </style>
 </head>
 <body>
+  <div class="hearts-container" aria-hidden="true"></div>
   <div class="card">
     <div class="message" id="message"></div>
     <div class="signature" id="signature">Yago Christ</div>
@@ -67,32 +96,35 @@
   <audio id="dingSound" src="https://assets.mixkit.co/active_storage/sfx/2108/2108-preview.mp3"></audio>
 
   <script>
-    const text = `Querida,
+    // Floating hearts
+    const heartsContainer = document.querySelector('.hearts-container');
+    function spawnHeart(){
+      const heart = document.createElement('i');
+      heart.style.left = Math.random()*100 + '%';
+      heart.style.bottom = '-20px';
+      heartsContainer.appendChild(heart);
+      setTimeout(()=>heart.remove(), 6000);
+    }
+    setInterval(spawnHeart, 500);
 
-Cada palavra que digito aqui é uma batida do meu coração.
-Queria que soubesse que estar com você transforma o comum em algo inesquecível.
+    // Typewriter
+    const text = `Meu bem,\n\nCada palavra que digito aqui é uma batida do meu coração.\nQueria que soubesse que estar com você transforma o comum em algo inesquecível.\n\nCom carinho,`;
+    const msgEl = document.getElementById('message');
+    const signatureEl = document.getElementById('signature');
+    const keySound = document.getElementById('keySound');
+    const dingSound = document.getElementById('dingSound');
 
-Com carinho,`;
-    
-    const msgEl = document.getElementById("message");
-    const signatureEl = document.getElementById("signature");
-    const keySound = document.getElementById("keySound");
-    const dingSound = document.getElementById("dingSound");
-    
     let i = 0;
     function typeWriter() {
-      if (i < text.length) {
-        msgEl.innerHTML = text.substring(0, i+1) + '<span class="cursor"></span>';
+      if(i < text.length){
+        msgEl.innerHTML = text.substring(0,i+1) + '<span class="cursor"></span>';
+        if(text[i] !== ' ' && text[i] !== '\n'){ keySound.currentTime=0; keySound.play(); }
         i++;
-        if (text[i-1] !== " " && text[i-1] !== "\n") {
-          keySound.currentTime = 0;
-          keySound.play();
-        }
         setTimeout(typeWriter, 70 + Math.random()*80);
       } else {
         msgEl.innerHTML = text;
         dingSound.play();
-        setTimeout(()=>signatureEl.classList.add("stamp"), 800);
+        setTimeout(()=>signatureEl.classList.add('stamp'),800);
       }
     }
     typeWriter();
